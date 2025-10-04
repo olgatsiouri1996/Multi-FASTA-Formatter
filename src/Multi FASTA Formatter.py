@@ -1,71 +1,60 @@
+import os
 import threading
+import subprocess
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
-import textwrap
 
-def run_pipeline(input_file, fasta_width, progress_bar):
+def run_seqtk(input_file, fasta_width, keep_description, seq_uppercase, progress_bar):
+
+    # Start the progress bar
+    progress_bar.start()
+
+    # Change to the input file's directory
+    os.chdir(os.path.dirname(input_file))
+
+    # Retrieve filename and extension from input file
+    filename, ext = os.path.splitext(os.path.basename(input_file))
+
+    # Create output file
+    output_file = f"{filename}.w{fasta_width}{ext}"
+
+    # Create output filepath based on Windows
+    output_file_fixed = os.path.join(os.path.dirname(input_file), output_file).replace("/","\\")
+
+    # Select whether or not to convert to uppercase
+    up_opt = "U" if seq_uppercase else ""
+    
+    # Select whether or not to keep descriptiond
+    desc_opt = "" if keep_description else "C"
+
+    # Create command
+    command = f'seqtk seq -{up_opt}{desc_opt}l{fasta_width} {input_file} > {output_file}'
+
     try:
-        # Start the progress bar
-        progress_bar.start()
-    
-        # Import fasta file
-        with open(input_file, 'r') as file:
-            fasta_data = file.read()
-
-        # Split each fasta record
-        records = fasta_data.strip().split('>')[1:]
-
-        # reformat each fasta record
-        if fasta_width > 0:
-            def fasta_record(record):
-                # Remove windows line endings
-                seqs = str(record).replace("\r","")
-                # Retrieve fasta header
-                header = str(seqs.split("\n")[0]).strip()
-                # Retrieve fasta sequence (-1 is because the last \n leaves an empty string, thus it's removed)
-                seq = ''.join(seqs.split("\n")[1:-1])
-                # Wrap seq
-                wrapped_seq = textwrap.fill(seq,width=fasta_width)
-                # Create fasta format output
-                fasta_format = f">{header}\n{wrapped_seq}\n"
-                return fasta_format
-        else:
-            def fasta_record(record):
-                # Remove windows line endings
-                seqs = str(record).replace("\r","")
-                # Retrieve fasta header
-                header = str(seqs.split("\n")[0]).strip()
-                # Retrieve fasta sequence (-1 is because the last \n leaves an empty string, thus it's removed)
-                seq = ''.join(seqs.split("\n")[1:-1])
-                # Create fasta format output
-                fasta_format = f">{header}\n{seq}\n"
-                return fasta_format
-
-        # Apply to all fasta records
-        wrapped_records = map(fasta_record,records)
-
-        # Export to file
-        with open(input_file, 'w') as file:
-            for wrapped_record in wrapped_records:
-                file.write(wrapped_record)
-
-    
+        subprocess.run(command, check=True, shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
         progress_bar.stop()
-        messagebox.showinfo("Success", f"FASTA file reformatted successfully.")
+        messagebox.showinfo("Success", f"Output file created at: {output_file_fixed}")
+
+    except subprocess.CalledProcessError as e:
+        progress_bar.stop()
+        messagebox.showerror("Error", f"Failed to run seqkit: {e}")
+        
     except Exception as e:
         progress_bar.stop()
         messagebox.showerror("Error", str(e))
-        
+
 def start_thread():
     input_file = input_file_var.get()
     fasta_width = width_var.get()
-
-    if not input_file:
-        messagebox.showwarning("Input Error", "Please select an input directory.")
-        return
+    keep_description = description_var.get()
+    seq_uppercase = uppercase_var.get()
     
-    # Start command in a new thread
-    thread = threading.Thread(target=run_pipeline, args=(input_file, fasta_width, progress_bar))
+    if not input_file:
+        messagebox.showwarning("Input Error", "Please select an input file.")
+        return
+
+    # Start seqkit command in a new thread
+    thread = threading.Thread(target=run_seqtk, args=(input_file, fasta_width, keep_description, seq_uppercase, progress_bar))
     thread.start()
 
 def select_file():
@@ -78,23 +67,34 @@ app.title("Multi FASTA Formatter")
 
 # Input file selection
 input_file_var = tk.StringVar()
-tk.Label(app, text="Input file:").grid(row=0, column=0, padx=10, pady=10, sticky="e")
+tk.Label(app, text="Input FASTA file:").grid(row=0, column=0, padx=10, pady=10, sticky="e")
 tk.Entry(app, textvariable=input_file_var, width=40).grid(row=0, column=1, padx=10, pady=10)
 tk.Button(app, text="Browse", command=select_file).grid(row=0, column=2, padx=10, pady=10)
 
-# Fasta width selection
-tk.Label(app, text="FASTA Width:").grid(row=1, column=0, padx=10, pady=10, sticky="e")
-width_var = tk.IntVar(value=80)
-width_options = [0, 60, 70, 80]
-width_dropdown = tk.OptionMenu(app, width_var, *width_options)
-width_dropdown.grid(row=1, column=1, padx=10, pady=10, sticky="w")
+# Checkbox for additional option
+description_var = tk.BooleanVar(value=True)
+tk.Checkbutton(app, text="Keep FASTA descriptions", variable=description_var).grid(row=1, column=1, padx=10, pady=10, sticky="w")
 
+# Checkbox for additional option
+uppercase_var = tk.BooleanVar(value=True)
+tk.Checkbutton(app, text="Convert sequence to uppercase", variable=uppercase_var).grid(row=2, column=1, padx=10, pady=10, sticky="w")
+
+# Fasta width selection
+tk.Label(app, text="FASTA Width:").grid(row=3, column=0, padx=10, pady=10, sticky="e")
+width_var = tk.StringVar(value="80")
+width_options = [0, 60, 80]
+width_dropdown = tk.OptionMenu(app, width_var, *width_options)
+width_dropdown.grid(row=3, column=1, padx=10, pady=10, sticky="w")
 
 # Progress Bar (indeterminate)
 progress_bar = ttk.Progressbar(app, mode="indeterminate", length=200)
-progress_bar.grid(row=2, column=0, columnspan=3, padx=10, pady=20)
+progress_bar.grid(row=4, column=0, columnspan=3, padx=10, pady=20)
 
 # Start button
-tk.Button(app, text="Run program", command=start_thread).grid(row=3, column=1, padx=10, pady=20)
+tk.Button(app, text="Format FASTA", command=start_thread).grid(row=5, column=1, padx=10, pady=20)
+
+# Trademark label
+trademark_label = tk.Label(app,  text="Copyright (c) Olga Tsiouri, 2025 <olgatsiouri@outlook.com>", font=("Arial", 10), fg="black")
+trademark_label.grid(row=6, column=0, columnspan=3, pady=(20, 10), sticky="s")
 
 app.mainloop()
